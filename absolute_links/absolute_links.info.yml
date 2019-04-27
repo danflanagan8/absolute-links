@@ -1,0 +1,6 @@
+name: Absolute Links
+description: Some field fomratter extensions that have absolute link option
+package: CDW
+type: module
+version: 1.0
+core: 8.x

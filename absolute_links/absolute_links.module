@@ -1,0 +1,142 @@
+<?php
+
+use Drupal\image\Entity\ImageStyle;
+
+/**
+ * Implements hook_theme().
+ */
+function absolute_links_theme() {
+  return [
+    'image_style_absolute' => [
+      'variables' => [
+        'style_name' => NULL,
+        'uri' => NULL,
+        'width' => NULL,
+        'height' => NULL,
+        'alt' => '',
+        'title' => NULL,
+        'attributes' => [],
+      ],
+    ],
+    'image_formatter_absolute' => [
+      'variables' => ['item' => NULL, 'item_attributes' => NULL, 'url' => NULL, 'image_style' => NULL],
+    ],
+    'image_absolute' => [
+      'variables' => ['uri' => NULL, 'width' => NULL, 'height' => NULL, 'alt' => '', 'title' => NULL, 'attributes' => [], 'sizes' => NULL, 'srcset' => [], 'style_name' => NULL],
+    ],
+  ];
+}
+
+function absolute_links_preprocess_image_formatter_absolute(&$variables) {
+  if ($variables['image_style']) {
+    $variables['image'] = [
+      '#theme' => 'image_style_absolute',
+      '#style_name' => $variables['image_style'],
+    ];
+  }
+  else {
+    $variables['image'] = [
+      '#theme' => 'image_absolute',
+    ];
+  }
+  $variables['image']['#attributes'] = $variables['item_attributes'];
+
+  $item = $variables['item'];
+
+  // Do not output an empty 'title' attribute.
+  if (mb_strlen($item->title) != 0) {
+    $variables['image']['#title'] = $item->title;
+  }
+
+  if (($entity = $item->entity) && empty($item->uri)) {
+    $variables['image']['#uri'] = $entity->getFileUri();
+  }
+  else {
+    $variables['image']['#uri'] = $item->uri;
+  }
+
+  foreach (['width', 'height', 'alt'] as $key) {
+    $variables['image']["#$key"] = $item->$key;
+  }
+}
+
+function absolute_links_preprocess_image_style_absolute(&$variables) {
+  $style = ImageStyle::load($variables['style_name']);
+
+  // Determine the dimensions of the styled image.
+  $dimensions = [
+    'width' => $variables['width'],
+    'height' => $variables['height'],
+  ];
+
+  $style->transformDimensions($dimensions, $variables['uri']);
+
+  $variables['image'] = [
+    '#theme' => 'image_absolute',
+    '#width' => $dimensions['width'],
+    '#height' => $dimensions['height'],
+    '#attributes' => $variables['attributes'],
+    '#style_name' => $variables['style_name'],
+  ];
+
+  // If the current image toolkit supports this file type, prepare the URI for
+  // the derivative image. If not, just use the original image resized to the
+  // dimensions specified by the style.
+  if ($style->supportsUri($variables['uri'])) {
+    $variables['image']['#uri'] = $style->buildUrl($variables['uri']);
+  }
+  else {
+    $variables['image']['#uri'] = $variables['uri'];
+    // Don't render the image by default, but allow other preprocess functions
+    // to override that if they need to.
+    $variables['image']['#access'] = FALSE;
+
+    // Inform the site builders why their image didn't work.
+    \Drupal::logger('image')->warning('Could not apply @style image style to @uri because the style does not support it.', [
+      '@style' => $style->label(),
+      '@uri' => $variables['uri'],
+    ]);
+  }
+
+  if (isset($variables['alt']) || array_key_exists('alt', $variables)) {
+    $variables['image']['#alt'] = $variables['alt'];
+  }
+  if (isset($variables['title']) || array_key_exists('title', $variables)) {
+    $variables['image']['#title'] = $variables['title'];
+  }
+
+}
+
+function absolute_links_preprocess_image_absolute(&$variables) {
+  if (!empty($variables['uri'])) {
+    $variables['attributes']['src'] = file_create_url($variables['uri']);
+  }
+  // Generate a srcset attribute conforming to the spec at
+  // http://www.w3.org/html/wg/drafts/html/master/embedded-content.html#attr-img-srcset
+  if (!empty($variables['srcset'])) {
+    $srcset = [];
+    foreach ($variables['srcset'] as $src) {
+      // URI is mandatory.
+      $source = file_create_url($src['uri']);
+      if (isset($src['width']) && !empty($src['width'])) {
+        $source .= ' ' . $src['width'];
+      }
+      elseif (isset($src['multiplier']) && !empty($src['multiplier'])) {
+        $source .= ' ' . $src['multiplier'];
+      }
+      $srcset[] = $source;
+    }
+    $variables['attributes']['srcset'] = implode(', ', $srcset);
+  }
+
+  foreach (['width', 'height', 'alt', 'title', 'sizes'] as $key) {
+    if (isset($variables[$key])) {
+      // If the property has already been defined in the attributes,
+      // do not override, including NULL.
+      if (array_key_exists($key, $variables['attributes'])) {
+        continue;
+      }
+      $variables['attributes'][$key] = $variables[$key];
+    }
+  }
+}
